@@ -1,0 +1,188 @@
+eda_task:
+  description: >
+    Usa el CSV Profiler Tool para perfilar el dataset en {dataset_path}.
+    Con base en lo que encuentres, genera un Jupyter Notebook de EDA adaptado
+    a ese dataset específico.
+
+    Pasos que el notebook debe cubrir:
+    1. Carga del dataset y visualización de shape, dtypes y primeras filas
+    2. Separación de variables: numéricas, categóricas (y temporales si existen)
+    3. Análisis del target ({target_variable}):
+       - Si es continuo: distribución, skewness, transformación log si es necesaria
+       - Si es categórico: balance de clases, frecuencias
+    4. Análisis de valores faltantes: tabla con conteo y porcentaje por columna.
+       Identifica si el missingness parece aleatorio o sistemático.
+    5. Distribución de variables numéricas: histogramas, boxplots, detección de outliers
+    6. Variables categóricas: cardinalidad, frecuencias, labels raros (<1% de aparición)
+    7. Correlación con el target (para numéricas: heatmap; para categóricas: boxplot por categoría)
+    8. Sección de conclusiones: qué variables necesitan imputación, transformación,
+       encoding, binarización o eliminación. Esta sección es el input para el siguiente agente.
+
+    Al terminar, usa el Notebook Writer Tool para guardar el notebook en:
+    {output_folder}/01-EDA.ipynb
+    Pasa el contenido completo con bloques ```python para el código y texto
+    markdown para las explicaciones.
+    IMPORTANTE: El código debe funcionar para este dataset específico, con los
+    nombres de columnas reales que encontraste con el profiler.
+  expected_output: >
+    Confirmación de que el Notebook Writer Tool guardó exitosamente el archivo
+    {output_folder}/01-EDA.ipynb con análisis completo.
+  agent: data_analyst
+
+feature_engineering_task:
+  description: >
+    Basándote en las conclusiones del EDA sobre {dataset_path}, genera un
+    Jupyter Notebook de Feature Engineering en Python puro que aplique solo
+    las transformaciones que ese dataset necesita.
+
+    Reglas generales a seguir (adapta según lo que encontró el EDA):
+    - Separar train/test PRIMERO (80/20 o 90/10 según tamaño del dataset, random_state=0)
+    - Imputar categóricas: NaN → "Missing" para variables con missingness alto;
+      moda para variables con missingness bajo (<5%)
+    - Imputar numéricas: media + crear columna indicadora de missingness
+    - Variables temporales (años): transformar a "años transcurridos" desde año de referencia
+    - Variables numéricas con skew > 0.75: aplicar log1p o Yeo-Johnson según distribución
+    - Variables con >50% ceros: considerar binarización
+    - Variables categóricas ordinales (ej: calidades Excelente>Bueno>Regular):
+      aplicar encoding ordinal con mapping basado en el target
+    - Variables categóricas nominales de alta cardinalidad: RareLabelEncoder + OrdinalEncoder
+    - Escalar todo con MinMaxScaler al final
+    - Verificar que no quedan NaN ni infinitos en train y test
+
+    Al terminar, usa el Notebook Writer Tool para guardar el notebook en:
+    {output_folder}/02-Feature-Engineering.ipynb
+    IMPORTANTE: Usa los nombres de columna reales del dataset. No hardcodees
+    transformaciones que no aplican a este dataset.
+  expected_output: >
+    Confirmación de que el Notebook Writer Tool guardó exitosamente el archivo
+    {output_folder}/02-Feature-Engineering.ipynb con todas las transformaciones.
+  agent: feature_engineer
+
+pipeline_task:
+  description: >
+    Construye un Pipeline de sklearn reproducible para {dataset_path} que
+    encapsule todas las transformaciones del feature engineering anterior.
+
+    PRIMERO: Usa el CSV Profiler Tool para inspeccionar el dataset y entender
+    qué tipos de variables tiene y qué transformaciones necesita.
+
+    ESTILO DE REFERENCIA: El usuario tiene un estilo específico de pipeline que
+    DEBES seguir. Lee el archivo knowledge/pipeline_reference_style.md con el
+    File Reader Tool para entender la estructura esperada. El patrón clave es:
+
+    - Variables definidas como CONSTANTES en mayúsculas al inicio del notebook
+      (CATEGORICAL_VARS_WITH_NA_MISSING, NUMERICAL_VARS_WITH_NA, TEMPORAL_VARS, etc.)
+    - Pipeline como sklearn.pipeline.Pipeline con pasos nombrados entre comentarios separadores (===)
+    - Custom transformers (TemporalVariableTransformer, Mapper) definidos como clases
+      que heredan de BaseEstimator, TransformerMixin
+    - Orden obligatorio: Imputación → Temporal → Transformación → Mappers → Encoding
+    - Mappings para variables ordinales de calidad definidos como diccionarios Python
+
+    El notebook debe incluir:
+    1. Imports completos (sklearn, feature-engine, pandas, numpy, joblib)
+    2. Carga del dataset y separación train/test (test_size=0.1, random_state=0)
+    3. Transformación log del target
+    4. Definición de CONSTANTES con las listas de variables por tipo
+    5. Definición de custom transformers (TemporalVariableTransformer, Mapper)
+    6. Construcción del Pipeline con los pasos que el dataset necesita usando:
+       - feature-engine: CategoricalImputer, MeanMedianImputer, AddMissingIndicator,
+         LogTransformer, YeoJohnsonTransformer, RareLabelEncoder, OrdinalEncoder, DropFeatures
+       - sklearn: MinMaxScaler, Binarizer (via SklearnTransformerWrapper)
+       - Custom: TemporalVariableTransformer, Mapper
+    7. Ajustar el pipeline SOLO con X_train (sin data leakage)
+    8. Transformar X_train y X_test
+    9. Verificar ausencia de NaN en los datos transformados
+    10. Serializar el pipeline con: joblib.dump(pipeline, '{output_folder}/preprocessors.pkl')
+
+    El pipeline debe estar diseñado para funcionar con nuevos datasets
+    del mismo dominio: sus listas de variables se definen al inicio del
+    notebook como variables Python, no hardcodeadas dentro del Pipeline.
+
+    Al terminar, usa el Notebook Writer Tool para guardar el notebook en:
+    {output_folder}/03-Pipeline-sklearn.ipynb
+  expected_output: >
+    Confirmación de que el Notebook Writer Tool guardó exitosamente el archivo
+    {output_folder}/03-Pipeline-sklearn.ipynb con el Pipeline completo.
+  agent: pipeline_builder
+
+feature_selection_task:
+  description: >
+    Aplica selección de features sobre el dataset transformado de {dataset_path}
+    usando Lasso regularizado.
+
+    Pasos del notebook:
+    1. Cargar X_train y X_test transformados (output del pipeline anterior)
+    2. Preparar el target ({target_variable}):
+       - Si es continuo y sesgado: aplicar log1p
+       - Si es categórico binario: dejarlo tal cual para clasificación
+    3. Determinar el tipo de Lasso a usar:
+       - Regresión: sklearn.linear_model.Lasso
+       - Clasificación binaria: sklearn.linear_model.LogisticRegression(penalty='l1')
+    4. Ajustar el modelo con alpha=0.001 (o C=0.5 para clasificación)
+    5. Visualizar coeficientes: barplot horizontal con features vs coeficientes,
+       coloreando en rojo las features eliminadas (coef=0) y en verde las seleccionadas
+    6. Aplicar SelectFromModel para extraer features seleccionadas
+    7. Reporte final:
+       - Nº de features originales
+       - Nº de features seleccionadas
+       - Nº de features eliminadas
+       - Lista de features seleccionadas
+    8. Exportar lista: pd.Series(selected_features).to_csv('{output_folder}/selected_features.csv', index=False)
+
+    Al terminar, usa el Notebook Writer Tool para guardar el notebook en:
+    {output_folder}/04-Feature-Selection.ipynb
+    IMPORTANTE: El alpha del Lasso debe ajustarse según el número de features:
+    con muchas features (>100) usar alpha más alto para mayor regularización.
+  expected_output: >
+    Confirmación de que el Notebook Writer Tool guardó exitosamente el archivo
+    {output_folder}/04-Feature-Selection.ipynb con análisis completo de features.
+  agent: feature_selector
+
+code_review_task:
+  description: >
+    Revisa los 4 notebooks generados por los agentes anteriores en {output_folder}.
+    Usa el File Reader Tool para leer cada uno.
+
+    Para CADA notebook, verifica:
+
+    1. **Estructura del .ipynb**: Que el archivo es JSON válido y tiene celdas.
+       Si el archivo NO es JSON válido o está vacío, repórtalo como error crítico.
+
+    2. **Imports completos**: Que cada celda de código que usa una librería tenga
+       su import correspondiente. Imports comunes que suelen faltar:
+       - pandas as pd, numpy as np
+       - matplotlib.pyplot as plt, seaborn as sns
+       - from sklearn.model_selection import train_test_split
+       - from sklearn.preprocessing import MinMaxScaler, Binarizer
+       - from feature_engine.imputation import CategoricalImputer, MeanMedianImputer, AddMissingIndicator
+       - from feature_engine.encoding import RareLabelEncoder, OrdinalEncoder
+       - from feature_engine.transformation import LogTransformer, YeoJohnsonTransformer
+       - from feature_engine.selection import DropFeatures
+       - from feature_engine.wrappers import SklearnTransformerWrapper
+
+    3. **Variables definidas antes de usarse**: Que no se referencie una variable
+       o DataFrame que no fue creada en una celda anterior.
+
+    4. **Ruta del dataset**: Que el notebook cargue el CSV usando la ruta {dataset_path}.
+
+    5. **Sin data leakage**: Que el fit/entrenamiento solo use datos de train.
+
+    6. **Notebook 03 específicamente**: Verifica que el pipeline siga el estilo
+       de referencia. Lee el archivo knowledge/pipeline_reference_style.md con el
+       File Reader Tool para entender el estilo esperado. El pipeline debe:
+       - Ser un sklearn.pipeline.Pipeline con pasos nombrados
+       - Usar CONSTANTES en mayúsculas para las listas de variables
+       - Incluir custom transformers (TemporalVariableTransformer, Mapper) si el dataset tiene variables temporales u ordinales
+       - Seguir el orden: Imputación → Temporal → Transformación → Mappers → Encoding
+
+    Si encuentras errores en algún notebook, usa el Notebook Writer Tool para
+    regenerarlo con las correcciones aplicadas en la misma ruta.
+
+    Al final, genera un reporte con el estado de cada notebook.
+  expected_output: >
+    Reporte de revisión con el estado de cada notebook:
+    - 01-EDA.ipynb: OK o lista de errores encontrados y corregidos
+    - 02-Feature-Engineering.ipynb: OK o lista de errores encontrados y corregidos
+    - 03-Pipeline-sklearn.ipynb: OK o lista de errores encontrados y corregidos
+    - 04-Feature-Selection.ipynb: OK o lista de errores encontrados y corregidos
+  agent: code_reviewer
