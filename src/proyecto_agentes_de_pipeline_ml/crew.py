@@ -37,8 +37,9 @@ class ProyectoAgentesDePipelineMl():
     def pipeline_builder(self) -> Agent:
         return Agent(
             config=self.agents_config['pipeline_builder'],  # type: ignore[index]
-            tools=[CSVProfilerTool(), NotebookWriterTool(), FileReaderTool()],
-            verbose=True
+            tools=[NotebookWriterTool(), FileReaderTool()],
+            verbose=True,
+            max_iter=50,
         )
 
     @agent
@@ -47,6 +48,39 @@ class ProyectoAgentesDePipelineMl():
             config=self.agents_config['feature_selector'],  # type: ignore[index]
             tools=[NotebookWriterTool()],
             verbose=True
+        )
+
+    @agent
+    def model_selector(self) -> Agent:
+        return Agent(
+            config=self.agents_config['model_selector'],  # type: ignore[index]
+            tools=[NotebookWriterTool()],
+            verbose=True
+        )
+
+    @agent
+    def model_trainer(self) -> Agent:
+        return Agent(
+            config=self.agents_config['model_trainer'],  # type: ignore[index]
+            tools=[NotebookWriterTool()],
+            verbose=True
+        )
+
+    @agent
+    def scorer(self) -> Agent:
+        return Agent(
+            config=self.agents_config['scorer'],  # type: ignore[index]
+            tools=[NotebookWriterTool()],
+            verbose=True
+        )
+
+    @agent
+    def final_pipeline_builder(self) -> Agent:
+        return Agent(
+            config=self.agents_config['final_pipeline_builder'],  # type: ignore[index]
+            tools=[NotebookWriterTool()],
+            verbose=True,
+            max_iter=50,
         )
 
     @agent
@@ -75,6 +109,7 @@ class ProyectoAgentesDePipelineMl():
     def pipeline_task(self) -> Task:
         return Task(
             config=self.tasks_config['pipeline_task'],  # type: ignore[index]
+            context=[self.feature_engineering_task()],
         )
 
     @task
@@ -84,9 +119,56 @@ class ProyectoAgentesDePipelineMl():
         )
 
     @task
+    def model_selection_task(self) -> Task:
+        return Task(
+            config=self.tasks_config['model_selection_task'],  # type: ignore[index]
+            context=[self.eda_task(), self.feature_selection_task()],
+        )
+
+    @task
+    def model_training_task(self) -> Task:
+        return Task(
+            config=self.tasks_config['model_training_task'],  # type: ignore[index]
+            context=[self.pipeline_task(), self.feature_selection_task()],
+        )
+
+    @task
+    def scoring_task(self) -> Task:
+        return Task(
+            config=self.tasks_config['scoring_task'],  # type: ignore[index]
+            context=[
+                self.feature_engineering_task(),
+                self.pipeline_task(),
+                self.feature_selection_task(),
+                self.model_training_task(),
+            ],
+        )
+
+    @task
+    def final_pipeline_task(self) -> Task:
+        return Task(
+            config=self.tasks_config['final_pipeline_task'],  # type: ignore[index]
+            context=[
+                self.pipeline_task(),
+                self.feature_selection_task(),
+                self.model_training_task(),
+            ],
+        )
+
+    @task
     def code_review_task(self) -> Task:
         return Task(
             config=self.tasks_config['code_review_task'],  # type: ignore[index]
+            context=[
+                self.eda_task(),
+                self.feature_engineering_task(),
+                self.pipeline_task(),
+                self.feature_selection_task(),
+                self.model_selection_task(),
+                self.model_training_task(),
+                self.scoring_task(),
+                self.final_pipeline_task(),
+            ]
         )
 
     # --- Crew ---
